@@ -38,6 +38,10 @@ enum Commands {
         /// Show full detailed report
         #[arg(long)]
         detailed: bool,
+
+        /// Number of threads to use (default: auto-detect)
+        #[arg(short, long)]
+        threads: Option<usize>,
     },
 }
 
@@ -54,8 +58,8 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::UnusedClasses { directory, by_file, detailed } => {
-            if let Err(e) = handle_unused_classes(directory, by_file, detailed) {
+        Commands::UnusedClasses { directory, by_file, detailed, threads } => {
+            if let Err(e) = handle_unused_classes(directory, by_file, detailed, threads) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -80,9 +84,14 @@ fn handle_find_word(word: String, directory: String, all: bool) -> Result<(), Bo
 }
 
 /* ============================================================================================== */
-fn handle_unused_classes(directory: String, by_file: bool, detailed: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let detector = UnusedDetector::new(directory);
-    let report = detector.generate_report()?;
+fn handle_unused_classes(directory: String, by_file: bool, detailed: bool, threads: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut detector = UnusedDetector::new(directory);
+
+    if let Some(thread_count) = threads {
+        detector = detector.with_thread_count(thread_count);
+    }
+
+    let report = detector.generate_report_parallel()?;
     
     match (detailed, by_file) {
         (true, _) => report.print_detailed(),
