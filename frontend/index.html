@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Tag Finder</title>
+    <link data-trunk rel="css" href="styles/style.css">
+</head>
+<body>
+    <script>
+        // Tauri API polyfill for development
+        window.__TAURI__ = window.__TAURI__ || {
+            tauri: {
+                invoke: async function(cmd, args) {
+                    console.log('Tauri invoke:', cmd, args);
+                    // This will be replaced by actual Tauri API in production
+                    throw new Error('Tauri not available in this context');
+                }
+            }
+        };
+    </script>
+</body>
+</html>
