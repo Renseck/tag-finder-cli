@@ -45,7 +45,7 @@ enum Commands {
 fn main() {
     let args = Args::parse();
 
-    print_banner(Some("banner.txt"));
+    print_banner(Some("src/banner/banner.txt"));
     
     match args.command {
         Commands::FindWord { word, directory, all } => {
