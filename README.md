@@ -1,6 +1,7 @@
 <img style="display: block; margin: auto;" src="src/banner/banner.png"/>
 
 A powerful command-line tool for analyzing CSS/SCSS files and finding unused classes in your projects. Clean up your codebase by identifying dangling CSS classes that are safe to remove!
+You may consider using the GUI version of this application, [TagFinder](https://github.com/renseck/TagFinder).
 
 ## Features
 
