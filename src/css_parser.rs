@@ -1,13 +1,12 @@
 use std::collections::HashSet;
-use crate::file_walker::FileWalker;
 use crate::text_processor::{TextProcessor};
 use crate::progress_reporter::ProgressReporter;
 use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
 
 pub struct CssParser {
-    directory: String,
     thread_count: Option<usize>,
 }
 
@@ -19,9 +18,8 @@ pub struct CssClass {
 }
 
 impl CssParser {
-    pub fn new(directory: String) -> Self {
+    pub fn new() -> Self {
         Self { 
-            directory,
             thread_count: None,
         }
     }
@@ -33,12 +31,7 @@ impl CssParser {
     }
 
     /* ========================================================================================== */
-    pub fn extract_classes(&self) -> Result<Vec<CssClass>, Box<dyn std::error::Error>> {
-        let walker = FileWalker::new(self.directory.clone())
-            .with_extensions(vec!["css", "scss"]);
-        
-        let files_with_content = walker.walk_with_content()?;
-        
+    pub fn extract_classes(&self, files_with_content: Vec<(PathBuf, String)>) -> Result<Vec<CssClass>, Box<dyn std::error::Error>> {
         let processor = TextProcessor::new()
             .add_pattern("css_class", r"\.([a-zA-Z][a-zA-Z0-9_-]*)")?;
         
@@ -68,20 +61,14 @@ impl CssParser {
     }
 
     /* ========================================================================================== */
-    pub fn extract_classes_parallel(&self) -> Result<Vec<CssClass>, Box<dyn std::error::Error>> {
-        let walker = FileWalker::new(self.directory.clone())
-            .with_extensions(vec!["css", "scss"])
-            .with_thread_count(self.thread_count.unwrap_or(num_cpus::get()));
-        
-        let files_with_content = walker.walk_with_content_parallel()?;
-        
+    pub fn extract_classes_parallel(&self, files_with_content: Vec<(PathBuf, String)>) -> Result<Vec<CssClass>, Box<dyn std::error::Error>> {
         let processor = Arc::new(
             TextProcessor::new()
                 .add_pattern("css_class", r"\.([a-zA-Z][a-zA-Z0-9_-]*)")?
         );
         
         let progress = Arc::new(Mutex::new(
-            ProgressReporter::new(files_with_content.len(), "Processing CSS".to_string())
+            ProgressReporter::new(files_with_content.len(), "Processing file".to_string())
         ));
         
         // Configure thread pool

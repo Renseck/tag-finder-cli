@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use tag_finder::{print_header_line, FileScanner, UnusedDetector, print_banner};
+use tag_finder::{print_header_line, FileWalker, FileScanner, UnusedDetector, print_banner};
 
 #[derive(Parser)]
 #[command(name = "tag-finder")]
@@ -24,6 +24,10 @@ enum Commands {
         /// Show all matches, not just CSS-only ones
         #[arg(short, long)]
         all: bool,
+
+        /// Number of threads to use (default: auto-detect)
+        #[arg(short, long)]
+        threads: Option<usize>,
     },
     /// Analyze all CSS classes and find unused ones
     UnusedClasses {
@@ -45,15 +49,14 @@ enum Commands {
     },
 }
 
-/* ============================================================================================== */
 fn main() {
     let args = Args::parse();
 
     print_banner(Some("src/banner/banner.txt"));
     
     match args.command {
-        Commands::FindWord { word, directory, all } => {
-            if let Err(e) = handle_find_word(word, directory, all) {
+        Commands::FindWord { word, directory, all, threads } => {
+            if let Err(e) = handle_find_word(word, directory, all, threads) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -68,22 +71,6 @@ fn main() {
 }
 
 /* ============================================================================================== */
-fn handle_find_word(word: String, directory: String, all: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let scanner = FileScanner::new(word.clone(), directory);
-    let result = scanner.scan()?;
-    
-    if should_show_results(&result, all) {
-        print_word_search_results(&word, &result);
-    } else if has_non_css_matches(&result) {
-        println!("Word '{}' found but not CSS-only. Use --all to see details.", word);
-    } else {
-        println!("Word '{}' not found in any files.", word);
-    }
-    
-    Ok(())
-}
-
-/* ============================================================================================== */
 fn handle_unused_classes(directory: String, by_file: bool, detailed: bool, threads: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
     let mut detector = UnusedDetector::new(directory);
 
@@ -91,12 +78,37 @@ fn handle_unused_classes(directory: String, by_file: bool, detailed: bool, threa
         detector = detector.with_thread_count(thread_count);
     }
 
-    let report = detector.generate_report_parallel()?;
+    let report = detector.generate_report()?;
     
     match (detailed, by_file) {
         (true, _) => report.print_detailed(),
         (false, true) => report.print_by_file(),
         (false, false) => print_summary_with_preview(&report),
+    }
+    
+    Ok(())
+}
+
+/* ============================================================================================== */
+fn handle_find_word(word: String, directory: String, all: bool, threads: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut scanner = FileScanner::new();
+    let mut walker = FileWalker::new(directory.clone());
+
+    if let Some(thread_count) = threads {
+        scanner = scanner.with_thread_count(thread_count);
+        walker = walker.with_thread_count(thread_count);
+    }
+
+    let files_with_content = walker.walk_with_content_parallel()?;
+
+    let result = scanner.scan(word.clone(), files_with_content)?;
+    
+    if should_show_results(&result, all) {
+        print_word_search_results(&word, &result);
+    } else if has_non_css_matches(&result) {
+        println!("Word '{}' found but not CSS-only. Use --all to see details.", word);
+    } else {
+        println!("Word '{}' not found in any files.", word);
     }
     
     Ok(())
@@ -145,6 +157,7 @@ fn print_word_search_conclusion(word: &str, result: &tag_finder::ScanResult) {
         println!("\n⚠️  Word '{}' appears in non-CSS files too.", word);
     }
 }
+
 
 /* ============================================================================================== */
 fn print_summary_with_preview(report: &tag_finder::UnusedReport) {
