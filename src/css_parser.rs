@@ -31,6 +31,7 @@ impl CssParser {
     }
 
     /* ========================================================================================== */
+    // Currently unused
     pub fn extract_classes(&self, files_with_content: Vec<(PathBuf, String)>) -> Result<Vec<CssClass>, Box<dyn std::error::Error>> {
         let processor = TextProcessor::new()
             .add_pattern("css_class", r"\.([a-zA-Z][a-zA-Z0-9_-]*)")?;
