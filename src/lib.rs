@@ -5,7 +5,9 @@ pub mod utils;
 pub mod file_walker;
 pub mod text_processor;
 pub mod progress_reporter;
+pub mod config;
 
+pub use config::*;
 pub use scanner::{FileScanner, ScanResult};
 pub use css_parser::*;
 pub use unused_detector::*;

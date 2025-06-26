@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use tag_finder::{print_header_line, FileWalker, FileScanner, UnusedDetector, print_banner};
+use tag_finder::{print_header_line, FileWalker, FileScanner, UnusedDetector, print_banner, Config};
 
 #[derive(Parser)]
 #[command(name = "tag-finder")]
@@ -7,6 +7,10 @@ use tag_finder::{print_header_line, FileWalker, FileScanner, UnusedDetector, pri
 struct Args {
     #[command(subcommand)]
     command: Commands,
+
+    /// Path to config file (defaults to auto-discovery)
+    #[arg(short, long)]
+    config: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -53,16 +57,22 @@ fn main() {
     let args = Args::parse();
 
     print_banner(Some("src/banner/banner.txt"));
+
+    // Load configuration
+    let config = match args.config {
+        Some(config_path) => Config::from_file_or_default(&config_path),
+        None => Config::load_or_default(),
+    };
     
     match args.command {
         Commands::FindWord { word, directory, all, threads } => {
-            if let Err(e) = handle_find_word(word, directory, all, threads) {
+            if let Err(e) = handle_find_word(word, directory, all, threads, config) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
         }
         Commands::UnusedClasses { directory, by_file, detailed, threads } => {
-            if let Err(e) = handle_unused_classes(directory, by_file, detailed, threads) {
+            if let Err(e) = handle_unused_classes(directory, by_file, detailed, threads, config) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -71,8 +81,15 @@ fn main() {
 }
 
 /* ============================================================================================== */
-fn handle_unused_classes(directory: String, by_file: bool, detailed: bool, threads: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
-    let mut detector = UnusedDetector::new(directory);
+fn handle_unused_classes(
+    directory: String, 
+    by_file: bool, 
+    detailed: bool, 
+    threads: Option<usize>,
+    config: Config
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut detector = UnusedDetector::new(directory)
+        .with_config(config);
 
     if let Some(thread_count) = threads {
         detector = detector.with_thread_count(thread_count);
@@ -90,9 +107,16 @@ fn handle_unused_classes(directory: String, by_file: bool, detailed: bool, threa
 }
 
 /* ============================================================================================== */
-fn handle_find_word(word: String, directory: String, all: bool, threads: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_find_word(
+    word: String, 
+    directory: String, 
+    all: bool, 
+    threads: Option<usize>,
+    config: Config,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut scanner = FileScanner::new();
-    let mut walker = FileWalker::new(directory.clone());
+    let mut walker = FileWalker::new(directory.clone())
+        .with_config(config);
 
     if let Some(thread_count) = threads {
         scanner = scanner.with_thread_count(thread_count);

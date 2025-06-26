@@ -12,6 +12,7 @@ pub struct TextMatch {
     pub column: usize,
 }
 
+// TODO Smarter filtering: using `type-{}` (formatted later) should flag `type-fire` as used
 impl TextProcessor {
     pub fn new() -> Self {
         Self {
