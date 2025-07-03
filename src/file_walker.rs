@@ -2,6 +2,7 @@ use walkdir::WalkDir;
 use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use crate::config::Config;
+use crate::utils::{create_thread_pool};
 
 pub struct FileWalker {
     directory: String,
@@ -74,10 +75,7 @@ impl FileWalker {
     /* ========================================================================================== */
     pub fn walk_with_content_parallel(&self) -> Result<Vec<(PathBuf, String)>, Box<dyn std::error::Error>> {
         // Configure thread pool
-        let pool = match self.thread_count {
-            Some(count) => rayon::ThreadPoolBuilder::new().num_threads(count).build()?,
-            None => rayon::ThreadPoolBuilder::new().build()?,
-        };
+        let pool = create_thread_pool(self.thread_count)?;
 
         let files = self.walk()?;
         println!("📁 Reading {} files using {} threads...", files.len(), pool.current_num_threads());

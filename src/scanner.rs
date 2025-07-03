@@ -1,5 +1,6 @@
 use crate::text_processor::TextProcessor;
 use crate::config::Config;
+use crate::utils::{create_thread_pool, separate_items_by_condition};
 use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
 use std::path::PathBuf;
@@ -41,10 +42,7 @@ impl FileScanner {
         let processor = TextProcessor::new();
         
         // Configure thread pool
-        let pool = match self.thread_count {
-            Some(count) => rayon::ThreadPoolBuilder::new().num_threads(count).build()?,
-            None => rayon::ThreadPoolBuilder::new().build()?,
-        };
+        let pool = create_thread_pool(self.thread_count)?;
 
         let results: Vec<ScanFileResult> = pool.install(|| {
             files_with_content
@@ -90,16 +88,13 @@ impl FileScanner {
 
     /* ========================================================================================== */
     fn process_scan_results(&self, results: Vec<ScanFileResult>) -> Result<ScanResult, Box<dyn std::error::Error>> {
-        let mut css_files = Vec::new();
-        let mut other_files = Vec::new();
-        
-        for result in results {
-            if result.is_css {
-                css_files.push(result.file_path);
-            } else {
-                other_files.push(result.file_path);
-            }
-        }
+        let (css_results, other_results) = separate_items_by_condition(
+            results,
+            |result| result.is_css
+        );
+
+        let css_files: Vec<String> = css_results.into_iter().map(|r| r.file_path).collect();
+        let other_files: Vec<String> = other_results.into_iter().map(|r| r.file_path).collect();
 
         let is_css_only = !css_files.is_empty() && other_files.is_empty();
 

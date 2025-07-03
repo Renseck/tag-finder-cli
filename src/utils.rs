@@ -1,5 +1,48 @@
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+/* ======================================== Process utils ======================================= */
+pub fn create_thread_pool(thread_count: Option<usize>) -> Result<rayon::ThreadPool, Box<dyn std::error::Error>> {
+    let pool = match thread_count {
+        Some(count) => rayon::ThreadPoolBuilder::new().num_threads(count).build()?,
+        None => rayon::ThreadPoolBuilder::new().build()?,
+    };
+    Ok(pool)
+}
+
+/* ============================================================================================== */
+pub fn separate_items_by_condition<T, F>(items: Vec<T>, condition: F) -> (Vec<T>, Vec<T>) 
+where
+    F: Fn(&T) -> bool,
+{
+    let mut true_items = Vec::new();
+    let mut false_items = Vec::new();
+    
+    for item in items {
+        if condition(&item) {
+            true_items.push(item);
+        } else {
+            false_items.push(item);
+        }
+    }
+    
+    (true_items, false_items)
+}
+
+/* ============================================================================================== */
+pub fn calculate_progress_step_size(total: usize, target_updates: usize) -> usize {
+    std::cmp::max(1, total / target_updates)
+}
+
+/* ======================================= Printing utils ======================================= */
+pub fn update_progress(progress_counter: &Arc<Mutex<usize>>, total: usize, step_size: usize) {
+    let mut counter = progress_counter.lock().unwrap();
+    *counter += 1;
+    if *counter % step_size == 0 || *counter == total {
+        println!("      Processed {}/{} items...", *counter, total);
+    }
+}
 
 /* ============================================================================================== */
 pub fn print_header_line(width: usize) {
