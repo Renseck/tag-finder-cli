@@ -1,10 +1,12 @@
 use crate::text_processor::TextProcessor;
+use crate::config::Config;
 use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
 use std::path::PathBuf;
 
 pub struct FileScanner {
     thread_count: Option<usize>,
+    config: Option<Config>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -18,12 +20,19 @@ impl FileScanner {
     pub fn new() -> Self {
         Self {
             thread_count: None,
+            config: None,
         }
     }
 
     /* ========================================================================================== */
     pub fn with_thread_count(mut self, count: usize) -> Self {
         self.thread_count = Some(count);
+        self
+    }
+
+    /* ========================================================================================== */
+    pub fn with_config(mut self, config: Config) -> Self {
+        self.config = Some(config);
         self
     }
 
@@ -37,15 +46,27 @@ impl FileScanner {
             None => rayon::ThreadPoolBuilder::new().build()?,
         };
 
-        let results: Vec<(String, bool)> = pool.install(|| {
+        let results: Vec<ScanFileResult> = pool.install(|| {
             files_with_content
                 .par_iter()
                 .filter_map(|(file_path, content)| {
-                    if processor.find_exact_words(content, &target_word) {
+                    let has_match = if self.contains_special_chars(&target_word) {
+                        // For words with special characters, use simple string search
+                        content.contains(&target_word)
+                    } else {
+                        // For regular words, use exact word matching
+                        processor.find_exact_words(content, &target_word)
+                    };
+                    
+                    if has_match {
                         let file_path_str = file_path.to_string_lossy().to_string();
                         let extension = file_path.extension().and_then(|ext| ext.to_str());
-                        let is_css = matches!(extension, Some("css") | Some("scss"));
-                        Some((file_path_str, is_css))
+                        let is_css = self.is_css_file(extension);
+                        
+                        Some(ScanFileResult {
+                            file_path: file_path_str,
+                            is_css,
+                        })
                     } else {
                         None
                     }
@@ -53,14 +74,30 @@ impl FileScanner {
                 .collect()
         });
 
+        self.process_scan_results(results)
+    }
+
+    /* ========================================================================================== */
+    fn is_css_file(&self, extension: Option<&str>) -> bool {
+        if let Some(config) = &self.config {
+            extension.map_or(false, |ext| {
+                config.scan.css_extensions.iter().any(|css_ext| css_ext == ext)
+            })
+        } else {
+            matches!(extension, Some("css") | Some("scss"))
+        }
+    }
+
+    /* ========================================================================================== */
+    fn process_scan_results(&self, results: Vec<ScanFileResult>) -> Result<ScanResult, Box<dyn std::error::Error>> {
         let mut css_files = Vec::new();
         let mut other_files = Vec::new();
         
-        for (file_path, is_css) in results {
-            if is_css {
-                css_files.push(file_path);
+        for result in results {
+            if result.is_css {
+                css_files.push(result.file_path);
             } else {
-                other_files.push(file_path);
+                other_files.push(result.file_path);
             }
         }
 
@@ -73,4 +110,16 @@ impl FileScanner {
         })
     }
 
+    /* ========================================================================================== */
+    fn contains_special_chars(&self, word: &str) -> bool {
+        word.chars().any(|c| !c.is_alphanumeric() && c != '_' && c != '-')
+    }
+
+}
+
+// Helper struct for internal processing
+#[derive(Debug)]
+struct ScanFileResult {
+    file_path: String,
+    is_css: bool,
 }
