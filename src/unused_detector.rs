@@ -3,6 +3,7 @@ use crate::utils::{print_header_line, print_section_line};
 use crate::scanner::FileScanner;
 use crate::file_walker::FileWalker;
 use crate::config::Config;
+use crate::text_processor::{TextProcessor, DynamicPattern};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
@@ -67,8 +68,11 @@ impl UnusedDetector {
         // Extract classes
         let classes = self.extract_classes(css_files_with_content)?;
 
+        // Detect dynamic patterns
+        let dynamic_patterns = self.detect_patterns(&classes);
+
         // Check usage status
-        let (unused_classes, used_classes, by_file) = self.analyze_class_usage(&classes, all_files_with_content)?;
+        let (unused_classes, used_classes, by_file) = self.analyze_class_usage(&classes, all_files_with_content, &dynamic_patterns)?;
 
         Ok(UnusedReport {
             total_classes: classes.len(),
@@ -112,15 +116,34 @@ impl UnusedDetector {
     }
 
     /* ========================================================================================== */
+    fn detect_patterns(&self, classes: &[CssClass]) -> Vec<DynamicPattern> {
+        println!("🔍 Detecting dynamic patterns...");
+        let processor = TextProcessor::new();
+        let class_names: Vec<String> = classes.iter().map(|c| c.name.clone()).collect();
+        let patterns = processor.detect_dynamic_patterns(&class_names);
+        
+        if !patterns.is_empty() {
+            println!("📊 Found {} dynamic patterns:", patterns.len());
+            for pattern in &patterns {
+                println!("   {} (covers {} classes)", pattern.pattern, pattern.matching_classes.len());
+            }
+        }
+        
+        patterns
+    }
+
+    /* ========================================================================================== */
     fn analyze_class_usage(
         &self,
         classes: &[CssClass],
         all_files_with_content: Vec<(PathBuf, String)>,
+        dynamic_patterns: &[DynamicPattern],
     ) -> Result<(Vec<CssClass>, Vec<CssClass>, HashMap<String, Vec<UnusedClass>>), Box<dyn std::error::Error>> {
 
         let progress_counter = Arc::new(Mutex::new(0usize));
         let total = classes.len();
         let files_arc = Arc::new(all_files_with_content);
+        let patterns_arc = Arc::new(dynamic_patterns.to_vec());
         
         // Configure thread pool
         let pool = match self.thread_count {
@@ -129,8 +152,8 @@ impl UnusedDetector {
         };
 
         println!("🔍 Analyzing {} classes using {} threads...", total, pool.current_num_threads());
-
-        let results: Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>> = pool.install(|| {
+        println!("   Step 1: Checking exact matches...");
+        let exact_match_results: Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>> = pool.install(|| {
             classes
                 .par_iter()
                 .map(|class| -> Result<UnusedClass, Box<dyn std::error::Error + Send + Sync>> {
@@ -143,7 +166,7 @@ impl UnusedDetector {
                         }
                     }
 
-                    let is_unused = self.is_class_unused(class, &files_arc)?;
+                    let is_unused = self.is_class_unused_exact(class, &files_arc)?;
                     Ok(UnusedClass {
                         class: class.clone(),
                         is_unused,
@@ -152,38 +175,107 @@ impl UnusedDetector {
                 .collect()
         });
 
-        let unused_classes_results = results.map_err(|e| -> Box<dyn std::error::Error> { 
+        let exact_results = exact_match_results.map_err(|e| -> Box<dyn std::error::Error> { 
             Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
         })?;
-        
-        // Process results
-        let mut unused_classes = Vec::new();
+
+        // Separate classes into used and potentially unused
         let mut used_classes = Vec::new();
-        let mut by_file: HashMap<String, Vec<UnusedClass>> = HashMap::new();
-        
-        for unused_class in unused_classes_results {
-            by_file
-                .entry(unused_class.class.file.clone())
-                .or_default()
-                .push(unused_class.clone());
-            
-            if unused_class.is_unused {
-                unused_classes.push(unused_class.class);
-            } else {
+        let mut potentially_unused_classes = Vec::new();
+
+        for unused_class in exact_results {
+            if !unused_class.is_unused {
                 used_classes.push(unused_class.class);
+            } else {
+                potentially_unused_classes.push(unused_class.class);
             }
         }
+
+        println!("   Step 1 complete: {} used via exact match, {} need pattern check", 
+            used_classes.len(), potentially_unused_classes.len());
+
+        // Step 2: Only check dynamic patterns for classes that weren't found via exact match
+        let mut unused_classes = Vec::new();
         
+        if !potentially_unused_classes.is_empty() && !dynamic_patterns.is_empty() {
+            println!("   Step 2: Checking dynamic patterns for remaining {} classes...", potentially_unused_classes.len());
+            
+            let pattern_results: Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>> = pool.install(|| {
+                potentially_unused_classes
+                    .par_iter()
+                    .map(|class| -> Result<(CssClass, bool), Box<dyn std::error::Error + Send + Sync>> {
+                        let is_used_via_pattern = self.is_class_unused_dynamic(class, &files_arc, &patterns_arc)?;
+                        Ok((class.clone(), is_used_via_pattern))
+                    })
+                    .collect()
+            });
+
+            let pattern_results = pattern_results.map_err(|e| -> Box<dyn std::error::Error> { 
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            })?;
+
+            for (class, is_used_via_pattern) in pattern_results {
+                if is_used_via_pattern {
+                    used_classes.push(class);
+                } else {
+                    unused_classes.push(class);
+                }
+            }
+        } else {
+            // No patterns to check, all potentially unused classes are actually unused
+            unused_classes = potentially_unused_classes;
+        }
+
+        // Build the by_file structure
+        let mut by_file: HashMap<String, Vec<UnusedClass>> = HashMap::new();
+        
+        for class in &used_classes {
+            by_file
+                .entry(class.file.clone())
+                .or_default()
+                .push(UnusedClass {
+                    class: class.clone(),
+                    is_unused: false,
+                });
+        }
+        
+        for class in &unused_classes {
+            by_file
+                .entry(class.file.clone())
+                .or_default()
+                .push(UnusedClass {
+                    class: class.clone(),
+                    is_unused: true,
+                });
+        }
+
         println!("✅ Analysis complete!");
         Ok((unused_classes, used_classes, by_file))
     }
 
     /* ========================================================================================== */
-    fn is_class_unused(&self, class: &CssClass, files_with_content: &Arc<Vec<(PathBuf, String)>>) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    fn is_class_unused_exact(&self, class: &CssClass, files_with_content: &Arc<Vec<(PathBuf, String)>>) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        // First try regular scanning for exact matches (fastest)
         let scanner = FileScanner::new();
         let result = scanner.scan(class.name.clone(), files_with_content.to_vec())
             .map_err(|e| format!("Scanner error: {}", e))?;
         Ok(result.is_css_only)
+    }
+
+    /* ========================================================================================== */
+    fn is_class_unused_dynamic(&self, class: &CssClass, files_with_content: &Arc<Vec<(PathBuf, String)>>, dynamic_patterns: &Arc<Vec<DynamicPattern>>) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        for pattern in dynamic_patterns.iter() {
+            if pattern.matching_classes.contains(&class.name) {
+                // Check if the pattern is used in any file
+                let processor = TextProcessor::new();
+                for (_, content) in files_with_content.iter() {
+                    if processor.find_pattern_usage(content, pattern) {
+                        return Ok(true); // Class is used via pattern
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 }
 
