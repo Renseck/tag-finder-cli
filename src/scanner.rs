@@ -1,8 +1,8 @@
 use crate::text_processor::TextProcessor;
 use crate::config::Config;
-use crate::utils::{create_thread_pool, separate_items_by_condition};
+use crate::utils::{separate_items_by_condition};
+use crate::parallel_processor::ParallelProcessor;
 use serde::{Deserialize, Serialize};
-use rayon::prelude::*;
 use std::path::PathBuf;
 
 pub struct FileScanner {
@@ -40,39 +40,35 @@ impl FileScanner {
     /* ========================================================================================== */
     pub fn scan(&self, target_word: String, files_with_content: Vec<(PathBuf, String)>) -> Result<ScanResult, Box<dyn std::error::Error>> {
         let processor = TextProcessor::new();
-        
-        // Configure thread pool
-        let pool = create_thread_pool(self.thread_count)?;
+        // Keep this on silent or it'll spam the hell out of console
+        let parallel_processor = ParallelProcessor::new(self.thread_count).with_progress(false);
 
-        let results: Vec<ScanFileResult> = pool.install(|| {
-            files_with_content
-                .par_iter()
-                .filter_map(|(file_path, content)| {
-                    let has_match = if self.contains_special_chars(&target_word) {
-                        // For words with special characters, use simple string search
-                        content.contains(&target_word)
-                    } else {
-                        // For regular words, use exact word matching
-                        processor.find_exact_words(content, &target_word)
-                    };
+        let results = parallel_processor.process(
+            files_with_content,
+            |(file_path, content)| -> Result<Option<ScanFileResult>, Box<dyn std::error::Error + Send + Sync>> {
+                let has_match = if self.contains_special_chars(&target_word) {
+                    content.contains(&target_word)
+                } else {
+                    processor.find_exact_words(content, &target_word)
+                };
+                
+                if has_match {
+                    let file_path_str = file_path.to_string_lossy().to_string();
+                    let extension = file_path.extension().and_then(|ext| ext.to_str());
+                    let is_css = self.is_css_file(extension);
                     
-                    if has_match {
-                        let file_path_str = file_path.to_string_lossy().to_string();
-                        let extension = file_path.extension().and_then(|ext| ext.to_str());
-                        let is_css = self.is_css_file(extension);
-                        
-                        Some(ScanFileResult {
-                            file_path: file_path_str,
-                            is_css,
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        });
+                    Ok(Some(ScanFileResult {
+                        file_path: file_path_str,
+                        is_css,
+                    }))
+                } else {
+                    Ok(None)
+                }
+            },
+            "Scanning files"
+        )?;
 
-        self.process_scan_results(results)
+        self.process_scan_results(results.into_iter().flatten().collect())
     }
 
     /* ========================================================================================== */

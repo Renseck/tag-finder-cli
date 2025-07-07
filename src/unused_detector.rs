@@ -4,11 +4,11 @@ use crate::scanner::FileScanner;
 use crate::file_walker::FileWalker;
 use crate::config::Config;
 use crate::text_processor::{TextProcessor, DynamicPattern};
+use crate::parallel_processor::ParallelProcessor;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
-use rayon::prelude::*;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 
 pub struct UnusedDetector {
     directory: String,
@@ -167,28 +167,20 @@ impl UnusedDetector {
         classes: &[CssClass],
         files_arc: &Arc<Vec<(PathBuf, String)>>,
     ) -> Result<(Vec<CssClass>, Vec<CssClass>), Box<dyn std::error::Error>> {
-        let pool = create_thread_pool(self.thread_count)?;
-        let progress_counter = Arc::new(Mutex::new(0usize));
-        let total = classes.len();
-        let step_size = calculate_progress_step_size(total, 20);
+        println!("🔍 Analyzing {} classes using {} threads...", classes.len(), get_thread_count_or_default(self.thread_count));
 
-        println!("🔍 Analyzing {} classes using {} threads...", total, pool.current_num_threads());
+        let processor = ParallelProcessor::new(self.thread_count);
+
         println!("   Step 1: Checking exact matches...");
 
-        let exact_match_results: Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>> = pool.install(|| {
-            classes
-                .par_iter()
-                .map(|class| -> Result<(CssClass, bool), Box<dyn std::error::Error + Send + Sync>> {
-                    update_progress(&progress_counter, total, step_size);
-                    let is_unused = self.is_class_unused_exact(class, files_arc)?;
-                    Ok((class.clone(), is_unused))
-                })
-                .collect()
-        });
-
-        let exact_results = exact_match_results.map_err(|e| -> Box<dyn std::error::Error> { 
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-        })?;
+        let exact_results = processor.process(
+            classes.to_vec(), 
+            |class| -> Result<(CssClass, bool), Box<dyn std::error::Error + Send + Sync>> {
+                let is_unused = self.is_class_unused_exact(class, files_arc)?;
+                Ok((class.clone(), is_unused))
+            },
+            "Analyzing exact matches for"
+        )?;
 
         let (used_classes, potentially_unused_classes) = separate_items_by_condition(
             exact_results,
@@ -218,29 +210,27 @@ impl UnusedDetector {
 
         println!("   Step 2: Checking dynamic patterns for remaining {} classes...", potentially_unused_classes.len());
         
-        let pool = create_thread_pool(self.thread_count)?;
-        let pattern_results: Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>> = pool.install(|| {
-            potentially_unused_classes
-                .par_iter()
-                .map(|class| -> Result<(CssClass, bool), Box<dyn std::error::Error + Send + Sync>> {
-                    let is_used_via_pattern = self.is_class_unused_dynamic(class, files_arc, patterns_arc)?;
-                    Ok((class.clone(), is_used_via_pattern))
-                })
-                .collect()
-        });
-
-        let pattern_results = pattern_results.map_err(|e| -> Box<dyn std::error::Error> { 
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-        })?;
+        let processor = ParallelProcessor::new(self.thread_count);
+        
+        let pattern_results = processor.process(
+            potentially_unused_classes,
+            |class| -> Result<(CssClass, bool), Box<dyn std::error::Error + Send + Sync>> {
+                let is_used_via_pattern = self.is_class_unused_dynamic(class, files_arc, patterns_arc)?;
+                Ok((class.clone(), is_used_via_pattern))
+            },
+            "Analyzing dynamic matches for"
+        )?;
 
         let (pattern_used_classes, unused_classes) = separate_items_by_condition(
             pattern_results,
-            |(_, is_used)| *is_used  // true condition = used via pattern
+            |(_, is_used)| *is_used
         );
 
-        // Add pattern-used classes to the main used classes list
         used_classes.extend(pattern_used_classes.into_iter().map(|(class, _)| class));
         let unused_classes: Vec<CssClass> = unused_classes.into_iter().map(|(class, _)| class).collect();
+
+        println!("   Step 2 complete: {} used via dynamic pattern, {} remain unused", 
+            used_classes.len(), unused_classes.len());
 
         Ok((used_classes, unused_classes))
     }

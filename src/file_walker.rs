@@ -1,8 +1,8 @@
 use walkdir::WalkDir;
 use std::path::{Path, PathBuf};
-use rayon::prelude::*;
+use crate::parallel_processor::ParallelProcessor;
+use crate::utils::{get_thread_count_or_default};
 use crate::config::Config;
-use crate::utils::{create_thread_pool};
 
 pub struct FileWalker {
     directory: String,
@@ -74,28 +74,23 @@ impl FileWalker {
 
     /* ========================================================================================== */
     pub fn walk_with_content_parallel(&self) -> Result<Vec<(PathBuf, String)>, Box<dyn std::error::Error>> {
-        // Configure thread pool
-        let pool = create_thread_pool(self.thread_count)?;
-
         let files = self.walk()?;
-        println!("📁 Reading {} files using {} threads...", files.len(), pool.current_num_threads());
+        println!("📁 Reading {} files using {} threads...", files.len(), get_thread_count_or_default(self.thread_count));
 
-        let results: Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>> = pool.install(|| {
-            files
-                .par_iter()
-                .map(|file| -> Result<Option<(PathBuf, String)>, Box<dyn std::error::Error + Send + Sync>> {
-                    match std::fs::read_to_string(file) {
-                        Ok(content) => Ok(Some((file.clone(), content))),
-                        Err(_) => Ok(None), // Skip files we can't read
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map(|vec| vec.into_iter().flatten().collect())
-        });
+        let processor = ParallelProcessor::new(self.thread_count);
+        
+        let results = processor.process(
+            files,
+            |file| -> Result<Option<(PathBuf, String)>, Box<dyn std::error::Error + Send + Sync>> {
+                match std::fs::read_to_string(file) {
+                    Ok(content) => Ok(Some((file.clone(), content))),
+                    Err(_) => Ok(None), // Skip files we can't read
+                }
+            },
+            "Reading files"
+        )?;
 
-        results.map_err(|e| -> Box<dyn std::error::Error> { 
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-         })
+        Ok(results.into_iter().flatten().collect())
     }
     
     /* ========================================================================================== */

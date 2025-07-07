@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use crate::has_extension;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
@@ -122,19 +123,11 @@ impl Config {
 
     /* ========================================================================================== */
     pub fn should_include_file(&self, file_path: &Path) -> bool {
-        if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
-            self.scan.include_extensions.iter().any(|allowed| allowed == ext)
-        } else {
-            false
-        }
+        has_extension(file_path, &self.scan.include_extensions.iter().map(|s| s.as_str()).collect::<Vec<_>>())
     }
 
     /* ========================================================================================== */
     pub fn is_css_file(&self, file_path: &Path) -> bool {
-        if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
-            self.scan.css_extensions.iter().any(|css_ext| css_ext == ext)
-        } else {
-            false
-        }
+        has_extension(file_path, &self.scan.css_extensions.iter().map(|s| s.as_str()).collect::<Vec<_>>())
     }
 }

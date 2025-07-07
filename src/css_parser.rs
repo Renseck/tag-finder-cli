@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use crate::text_processor::{TextProcessor};
 use crate::progress_reporter::ProgressReporter;
+use crate::parallel_processor::ParallelProcessor;
 use serde::{Deserialize, Serialize};
-use rayon::prelude::*;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use std::path::PathBuf;
 
 pub struct CssParser {
@@ -63,52 +63,34 @@ impl CssParser {
 
     /* ========================================================================================== */
     pub fn extract_classes_parallel(&self, files_with_content: Vec<(PathBuf, String)>) -> Result<Vec<CssClass>, Box<dyn std::error::Error>> {
-        let processor = Arc::new(
+        let processor_arc = Arc::new(
             TextProcessor::new()
                 .add_pattern("css_class", r"\.([a-zA-Z][a-zA-Z0-9_-]*)")?
         );
-        
-        let progress = Arc::new(Mutex::new(
-            ProgressReporter::new(files_with_content.len(), "Processing file".to_string())
-        ));
-        
-        // Configure thread pool
-        let pool = match self.thread_count {
-            Some(count) => rayon::ThreadPoolBuilder::new().num_threads(count).build()?,
-            None => rayon::ThreadPoolBuilder::new().build()?,
-        };
 
-        let all_classes: Vec<CssClass> = pool.install(|| {
-            files_with_content
-                .par_iter()
-                .flat_map(|(file_path, content)| {
-                    // Update progress (thread-safe)
-                    if let Ok(mut prog) = progress.lock() {
-                        prog.tick();
-                    }
-                    
-                    let matches = processor.process_content(content);
-                    let file_path_str = file_path.to_string_lossy().to_string();
-                    
-                    matches
-                        .into_iter()
-                        .filter(|text_match| {
-                            text_match.pattern_name == "css_class" 
-                                && self.is_valid_class_name(&text_match.matched_text)
-                        })
-                        .map(|text_match| CssClass {
-                            name: text_match.matched_text,
-                            file: file_path_str.clone(),
-                            line: text_match.line,
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .collect()
-        });
+        let parallel_processor = ParallelProcessor::new(self.thread_count);
         
-        if let Ok(prog) = progress.lock() {
-            prog.finish("CSS extraction complete!");
-        }
+        let all_classes = parallel_processor.process_flat_map(
+            files_with_content,
+            |(file_path, content)| {
+                let matches = processor_arc.process_content(content);
+                let file_path_str = file_path.to_string_lossy().to_string();
+                
+                matches
+                    .into_iter()
+                    .filter(|text_match| {
+                        text_match.pattern_name == "css_class" 
+                            && self.is_valid_class_name(&text_match.matched_text)
+                    })
+                    .map(|text_match| CssClass {
+                        name: text_match.matched_text,
+                        file: file_path_str.clone(),
+                        line: text_match.line,
+                    })
+                    .collect::<Vec<_>>()
+            },
+            "Processing files for CSS classes"
+        )?;
         
         let mut classes = all_classes;
         self.deduplicate_classes(&mut classes);

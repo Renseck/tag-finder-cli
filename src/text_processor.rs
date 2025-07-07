@@ -21,7 +21,6 @@ pub struct DynamicPattern {
     pub matching_classes: Vec<String>, // e.g., ["type-fire", "type-water"]
 }
 
-// TODO Smarter filtering: using `type-{}` (formatted later) should flag `type-fire` as used
 impl TextProcessor {
     pub fn new() -> Self {
         Self {
