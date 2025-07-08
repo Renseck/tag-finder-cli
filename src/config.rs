@@ -40,6 +40,7 @@ fn default_include_extensions() -> Vec<String> {
         "ts".to_string(),
         "tsx".to_string(),
         "php".to_string(),
+        "rs".to_string(),
     ]
 }
 
