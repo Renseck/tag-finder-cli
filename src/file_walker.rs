@@ -24,47 +24,6 @@ impl FileWalker {
     }
 
     /* ========================================================================================== */
-    pub fn with_thread_count(mut self, count: usize) -> Self {
-        self.thread_count = Some(count);
-        self
-    }
-
-    /* ========================================================================================== */
-    pub fn with_config(mut self, config: Config) -> Self {
-        let exclude_dirs = config.scan.exclude_dirs.clone();
-        let include_extensions = config.scan.include_extensions.clone();
-        let css_extensions = config.scan.css_extensions.clone();
-        
-        // Combine include and CSS extensions for file filtering
-        let all_allowed_extensions = {
-            let mut combined = include_extensions.clone();
-            combined.extend(css_extensions);
-            combined
-        };
-        
-        self.file_filter = Box::new(move |path: &Path| {
-            // Check directory exclusions
-            for component in path.components() {
-                if let Some(dir_name) = component.as_os_str().to_str() {
-                    if exclude_dirs.iter().any(|excluded| excluded == dir_name) {
-                        return false;
-                    }
-                }
-            }
-            
-            // Check file extension inclusions
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                all_allowed_extensions.iter().any(|allowed| allowed == ext)
-            } else {
-                false // Exclude files without extensions
-            }
-        });
-
-        self.config = Some(config);
-        self
-    }
-
-    /* ========================================================================================== */
     pub fn walk(&self) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
         let files: Vec<PathBuf> = WalkDir::new(&self.directory)
             .into_iter()
@@ -146,15 +105,32 @@ impl ThreadCountConfigurable for FileWalker {
 impl ConfigConfigurable for FileWalker {
     fn with_config(mut self, config: Config) -> Self {
         let exclude_dirs = config.scan.exclude_dirs.clone();
+        let include_extensions = config.scan.include_extensions.clone();
+        let css_extensions = config.scan.css_extensions.clone();
+        
+        // Combine include and CSS extensions for file filtering
+        let all_allowed_extensions = {
+            let mut combined = include_extensions.clone();
+            combined.extend(css_extensions);
+            combined
+        };
+        
         self.file_filter = Box::new(move |path: &Path| {
+            // Check directory exclusions
             for component in path.components() {
                 if let Some(dir_name) = component.as_os_str().to_str() {
                     if exclude_dirs.iter().any(|excluded| excluded == dir_name) {
-                        return false
+                        return false;
                     }
                 }
             }
-            true
+            
+            // Check file extension inclusions
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                all_allowed_extensions.iter().any(|allowed| allowed == ext)
+            } else {
+                false // Exclude files without extensions
+            }
         });
 
         self.config = Some(config);
