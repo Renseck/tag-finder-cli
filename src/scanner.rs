@@ -2,6 +2,8 @@ use crate::text_processor::TextProcessor;
 use crate::config::Config;
 use crate::utils::{separate_items_by_condition};
 use crate::parallel_processor::ParallelProcessor;
+use crate::traits::{ThreadCountConfigurable, ConfigConfigurable, ProgressConfigurable};
+use crate::ProcessorBuilder;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -26,22 +28,11 @@ impl FileScanner {
     }
 
     /* ========================================================================================== */
-    pub fn with_thread_count(mut self, count: usize) -> Self {
-        self.thread_count = Some(count);
-        self
-    }
-
-    /* ========================================================================================== */
-    pub fn with_config(mut self, config: Config) -> Self {
-        self.config = Some(config);
-        self
-    }
-
-    /* ========================================================================================== */
     pub fn scan(&self, target_word: String, files_with_content: Vec<(PathBuf, String)>) -> Result<ScanResult, Box<dyn std::error::Error>> {
         let processor = TextProcessor::new();
         // Keep this on silent or it'll spam the hell out of console
-        let parallel_processor = ParallelProcessor::new(self.thread_count).with_progress(false);
+        let parallel_processor = ParallelProcessor::new().with_progress(false)
+                                                                                .configure_threads(self.thread_count);
 
         let results = parallel_processor.process(
             files_with_content,
@@ -106,6 +97,20 @@ impl FileScanner {
         word.chars().any(|c| !c.is_alphanumeric() && c != '_' && c != '-')
     }
 
+}
+
+impl ThreadCountConfigurable for FileScanner {
+    fn with_thread_count(mut self, count: usize) -> Self {
+        self.thread_count = Some(count);
+        self
+    }
+}
+
+impl ConfigConfigurable for FileScanner {
+    fn with_config(mut self, config: Config) -> Self {
+        self.config = Some(config);
+        self
+    }
 }
 
 // Helper struct for internal processing

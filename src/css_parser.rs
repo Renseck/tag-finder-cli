@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use crate::text_processor::{TextProcessor};
 use crate::parallel_processor::ParallelProcessor;
+use crate::ProcessorBuilder;
+use crate::traits::ThreadCountConfigurable;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc};
 use std::path::PathBuf;
@@ -36,7 +38,7 @@ impl CssParser {
                 .add_pattern("css_class", r"\.([a-zA-Z][a-zA-Z0-9_-]*)")?
         );
 
-        let parallel_processor = ParallelProcessor::new(self.thread_count);
+        let parallel_processor = ParallelProcessor::new().configure_threads(self.thread_count);
         
         let all_classes = parallel_processor.process_flat_map(
             files_with_content,
@@ -77,5 +79,12 @@ impl CssParser {
             let key = (class.name.clone(), class.file.clone());
             seen.insert(key)
         });
+    }
+}
+
+impl ThreadCountConfigurable for CssParser {
+    fn with_thread_count(mut self, count: usize) -> Self {
+        self.thread_count = Some(count);
+        self
     }
 }

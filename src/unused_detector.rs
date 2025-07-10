@@ -1,10 +1,11 @@
 use crate::css_parser::{CssClass, CssParser};
-use crate::utils::*;
+use crate::{utils::*, ProcessorBuilder};
 use crate::scanner::FileScanner;
 use crate::file_walker::FileWalker;
 use crate::config::Config;
 use crate::text_processor::{TextProcessor, DynamicPattern};
 use crate::parallel_processor::ParallelProcessor;
+use crate::traits::{ConfigConfigurable, ThreadCountConfigurable};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
@@ -40,22 +41,9 @@ impl UnusedDetector {
     }
 
     /* ========================================================================================== */
-    pub fn with_thread_count(mut self, count: usize) -> Self {
-        self.thread_count = Some(count);
-        self
-    }
-
-    /* ========================================================================================== */
-    pub fn with_config(mut self, config: Config) -> Self {
-        self.config = Some(config);
-        self
-    }
-
-    /* ========================================================================================== */
     pub fn generate_report(&self) -> Result<UnusedReport, Box<dyn std::error::Error>> {
         // Single walker for all operations
-        let mut walker = FileWalker::new(self.directory.clone())
-            .with_thread_count(self.thread_count.unwrap_or(num_cpus::get()));
+        let mut walker = FileWalker::new(self.directory.clone()).configure_threads(self.thread_count);
 
         if let Some(config) = &self.config {
             walker = walker.with_config(config.clone());
@@ -169,7 +157,7 @@ impl UnusedDetector {
     ) -> Result<(Vec<CssClass>, Vec<CssClass>), Box<dyn std::error::Error>> {
         println!("🔍 Analyzing {} classes using {} threads...", classes.len(), get_thread_count_or_default(self.thread_count));
 
-        let processor = ParallelProcessor::new(self.thread_count);
+        let processor = ParallelProcessor::new().configure_threads(self.thread_count);
 
         println!("   Step 1: Checking exact matches...");
 
@@ -210,7 +198,7 @@ impl UnusedDetector {
 
         println!("   Step 2: Checking dynamic patterns for remaining {} classes...", potentially_unused_classes.len());
         
-        let processor = ParallelProcessor::new(self.thread_count);
+        let processor = ParallelProcessor::new().configure_threads(self.thread_count);
         
         let pattern_results = processor.process(
             potentially_unused_classes,
@@ -285,6 +273,20 @@ impl UnusedDetector {
             }
         }
         Ok(false)
+    }
+}
+
+impl ThreadCountConfigurable for UnusedDetector {
+    fn with_thread_count(mut self, count: usize) -> Self {
+        self.thread_count = Some(count);
+        self
+    }
+}
+
+impl ConfigConfigurable for UnusedDetector {
+    fn with_config(mut self, config: Config) -> Self {
+        self.config = Some(config);
+        self
     }
 }
 

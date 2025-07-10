@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use crate::parallel_processor::ParallelProcessor;
 use crate::utils::{get_thread_count_or_default};
 use crate::config::Config;
+use crate::traits::{ThreadCountConfigurable, ConfigConfigurable};
+use crate::ProcessorBuilder;
 
 pub struct FileWalker {
     directory: String,
@@ -94,7 +96,7 @@ impl FileWalker {
         let files = self.walk()?;
         println!("📁 Reading {} files using {} threads...", files.len(), get_thread_count_or_default(self.thread_count));
 
-        let processor = ParallelProcessor::new(self.thread_count);
+        let processor = ParallelProcessor::new().configure_threads(self.thread_count);
         
         let results = processor.process(
             files,
@@ -130,6 +132,32 @@ impl FileWalker {
         F: Fn(&Path) -> bool + Send + Sync + 'static,
     {
         self.file_filter = Box::new(filter);
+        self
+    }
+}
+
+impl ThreadCountConfigurable for FileWalker {
+    fn with_thread_count(mut self, count: usize) -> Self {
+        self.thread_count = Some(count);
+        self
+    }
+}
+
+impl ConfigConfigurable for FileWalker {
+    fn with_config(mut self, config: Config) -> Self {
+        let exclude_dirs = config.scan.exclude_dirs.clone();
+        self.file_filter = Box::new(move |path: &Path| {
+            for component in path.components() {
+                if let Some(dir_name) = component.as_os_str().to_str() {
+                    if exclude_dirs.iter().any(|excluded| excluded == dir_name) {
+                        return false
+                    }
+                }
+            }
+            true
+        });
+
+        self.config = Some(config);
         self
     }
 }

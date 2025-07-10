@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use tag_finder::{print_header_line, FileWalker, FileScanner, UnusedDetector, print_banner, Config};
+use tag_finder::{print_header_line, FileWalker, FileScanner, UnusedDetector, print_banner, Config, traits::*};
 
 #[derive(Parser)]
 #[command(name = "tag-finder")]
@@ -88,13 +88,10 @@ fn handle_unused_classes(
     threads: Option<usize>,
     config: Config
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut detector = UnusedDetector::new(directory)
+    let detector = UnusedDetector::new(directory)
+        .configure_threads(threads)
         .with_config(config);
-
-    if let Some(thread_count) = threads {
-        detector = detector.with_thread_count(thread_count);
-    }
-
+    
     let report = detector.generate_report()?;
     
     match (detailed, by_file) {
@@ -114,14 +111,13 @@ fn handle_find_word(
     threads: Option<usize>,
     config: Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut scanner = FileScanner::new();
-    let mut walker = FileWalker::new(directory.clone())
-        .with_config(config);
+    let scanner = FileScanner::new()
+        .configure_threads(threads)
+        .with_config(config.clone());
 
-    if let Some(thread_count) = threads {
-        scanner = scanner.with_thread_count(thread_count);
-        walker = walker.with_thread_count(thread_count);
-    }
+    let walker = FileWalker::new(directory.clone())
+        .configure_threads(threads)
+        .with_config(config);
 
     let files_with_content = walker.walk_with_content_parallel()?;
 

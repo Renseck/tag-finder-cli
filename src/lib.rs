@@ -6,6 +6,7 @@ pub mod parallel_processor;
 pub mod file_walker;
 pub mod text_processor;
 pub mod config;
+pub mod traits;
 
 pub use config::*;
 pub use scanner::{FileScanner, ScanResult};
@@ -15,6 +16,7 @@ pub use utils::*;
 pub use parallel_processor::*;
 pub use file_walker::*;
 pub use text_processor::*;
+pub use traits::*;
 
 /* =============================== Some clean wrappers for the GUI ============================== */
 pub fn analyze_directory_gui(directory: &str) -> Result<UnusedReport, Box<dyn std::error::Error>> {
