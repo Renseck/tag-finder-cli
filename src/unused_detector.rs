@@ -127,33 +127,38 @@ impl UnusedDetector {
         all_files_with_content: Vec<(PathBuf, String)>,
         dynamic_patterns: &[DynamicPattern],
     ) -> Result<(Vec<CssClass>, Vec<CssClass>, HashMap<String, Vec<UnusedClass>>), Box<dyn std::error::Error>> {
-
-        let files_arc = Arc::new(all_files_with_content);
-        let patterns_arc = Arc::new(dynamic_patterns.to_vec());
-        
         // Step 1: Check exact matches
-        let (used_classes, potentially_unused_classes) = self.check_exact_matches(classes, &files_arc)?;
-        
-        // Step 2: Check dynamic patterns for remaining classes
-        let (final_used_classes, unused_classes) = self.check_dynamic_patterns(
-            used_classes, 
-            potentially_unused_classes, 
-            &files_arc, 
-            &patterns_arc
-        )?;
-        
-        // Step 3: Build by_file structure
-        let by_file = self.build_by_file_structure(&final_used_classes, &unused_classes);
+        let (used_classes, potentially_unused_classes) = self.check_exact_matches(classes, &all_files_with_content)?;
 
-        println!("✅ Analysis complete!");
-        Ok((unused_classes, final_used_classes, by_file))
+        // Step 2: Check dynamic patterns for remaining classes
+        if !potentially_unused_classes.is_empty() && !dynamic_patterns.is_empty() {
+            let files_arc = Arc::new(all_files_with_content);
+            let patterns_arc = Arc::new(dynamic_patterns.to_vec());
+
+            let (final_used_classes, unused_classes) = self.check_dynamic_patterns(
+                used_classes, 
+                potentially_unused_classes, 
+                &files_arc, 
+                &patterns_arc
+            )?;
+
+            let by_file = self.build_by_file_structure(&final_used_classes, &unused_classes);
+            println!("✅ Analysis complete!");
+            Ok((unused_classes, final_used_classes, by_file))
+        } else {
+            let by_file = self.build_by_file_structure(&used_classes, &potentially_unused_classes);
+            println!("✅ Analysis complete!");
+             Ok((potentially_unused_classes, used_classes, by_file))
+        }
+        
+        
     }
 
     /* ========================================================================================== */
     fn check_exact_matches(
         &self,
         classes: &[CssClass],
-        files_arc: &Arc<Vec<(PathBuf, String)>>,
+        files_with_content: &[(PathBuf, String)],
     ) -> Result<(Vec<CssClass>, Vec<CssClass>), Box<dyn std::error::Error>> {
         println!("🔍 Analyzing {} classes using {} threads...", classes.len(), get_thread_count_or_default(self.thread_count));
 
@@ -161,10 +166,11 @@ impl UnusedDetector {
 
         println!("   Step 1: Checking exact matches...");
 
+        let files_arc = Arc::new(files_with_content.to_vec());
         let exact_results = processor.process(
             classes.to_vec(), 
             |class| -> Result<(CssClass, bool), Box<dyn std::error::Error + Send + Sync>> {
-                let is_unused = self.is_class_unused_exact(class, files_arc)?;
+                let is_unused = self.is_class_unused_exact(class, &files_arc)?;
                 Ok((class.clone(), is_unused))
             },
             "Analyzing exact matches for"
